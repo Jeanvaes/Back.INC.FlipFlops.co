@@ -13,6 +13,8 @@ load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 class MedicalNoteExtraction(BaseModel):
+    id_paciente: str
+    prestacion: str
     nodulos: str  # 0(No), 1(Si)
     morfologia_nodulos: str  # 1(Ovalado), 2(Redondo), 3(Irregular)
     margenes_nodulos: str  # 1(Circunscritos), 2(Microlobulados), 3(Indistintos o mal definidos), 4(Obscurecidos), 5(Espiculados)
@@ -55,14 +57,16 @@ async def process_medical_csv(
 
     structured_data = []
 
-    for index, row in df.head(1000).iterrows(): 
+    for index, row in df.head(2).iterrows(): 
+        presentacion = row['PRESTACION']
+        id_paciente = row['ID_DOCUMENTO']
         notes = row['ESTUDIO']  
         
         response = openai.beta.chat.completions.parse(
             model="gpt-4o-mini-2024-07-18",
             messages=[
                 {"role": "system", "content": content },
-                {"role": "user", "content": f"Extract the following information from the notes: {notes}. Look for terms like {search_terms}."}
+                {"role": "user", "content": f"Add ID_PACIENTE: {id_paciente} and PRESTACION: {presentacion} to each corresponding register. Extract the following information from the notes: {notes}. Look for terms like {search_terms}."}
             ],
             response_format=MedicalNoteExtraction,
         )
