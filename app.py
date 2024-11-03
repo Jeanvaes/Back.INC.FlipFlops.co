@@ -6,6 +6,8 @@ import openai
 import pandas as pd
 from typing import List
 from pydantic import BaseModel
+import json
+
 
 app = FastAPI()
 
@@ -20,7 +22,6 @@ class MedicalNoteExtraction(BaseModel):
     margenes_nodulos: str  # 1(Circunscritos), 2(Microlobulados), 3(Indistintos o mal definidos), 4(Obscurecidos), 5(Espiculados)
     densidad_nodulo: str  # 1(Densidad Grasa), 2(Baja Densidad (hipodenso)), 3(Igual Densidad (isodenso)), 4(Alta Densidad (hiperdenso))
     microcalcificaciones: str  # 0(No), 1(Si)
-    presencia_microcalcificaciones: str  # 0(No), 1(Si)
     calcificaciones_benignas: str  # 1(Cutaneas), 2(Vasculares), 3(Gruesas o Pop Corn), 4(Leño o Vara), 5(Redondas o puntiformes), 6(Anulares), 7(Distroficas), 8(Leche de Calcio), 9(Suturas)
     calcificaciones_sospechosas: str  # 1(Gruesas heterogeneas), 2(Amorfas), 3(Finas pleomorficas), 4(Lineas finas o lineales ramificadas)
     distribucion_calcificaciones: str  # 1(Difusas), 2(Regionales), 3(Agrupadas (cumulo)), 4(Segmentaria), 5(Lineal)
@@ -29,6 +30,8 @@ class MedicalNoteExtraction(BaseModel):
     hallazgos_asociados: str  # 1(Retracción de la piel), 2(Retracción del pezón), 3(Engrosamiento de la piel), 4(Engrosamiento trabecular), 5(Adenopatias axilares)
     lateralidad_hallazgo: str  # 1(DERECHO), 2(IZQUIERDO), 3(BILATERAL)
     birads: str  # 0, 1, 2, 3, 4A, 4B, 4C, 5, 6
+    edad: str
+
     
 
 @app.post("/process-medical-csv/")
@@ -46,27 +49,38 @@ async def process_medical_csv(
     content= '''You are an expert at extracting structured data from medical notes. Follow the same parameters: -Nodulos: 0(No) 1(Si) 
     -Morfologia de los nodulos:1(Ovalado) 2(Redondo) 3(Irregular) -Margenes de los nodulos: 1(Circunscritos), 2(Microlobulados), 3(Indistintos o mal definidos), 4(Obscurecidos), 5(Espiculados) 
     -Densidad del nodulo: 1(Densidad Grasa), 2(Baja Densidad (hipodenso)), 3(Igual Densidad (isodenso)), 4(Alta Densidad (hiperdenso))  
-    -Microcalcificaciones: 0(No) 1(Si) -Presencia de las microcalcificaciones: 0(No) 1(Si) -Calcificaciones tipicamente benignas: 1(Cutaneas), 2(Vasculares), 3(Gruesas o Pop Corn), 4(Leño o Vara), 5(Redondas o puntiformes), 6(Anulares), 7(Distroficas), 8(Leche de Calcio), 9(Suturas)  
+    -Microcalcificaciones: 0(No) 1(Si) -Calcificaciones tipicamente benignas: 1(Cutaneas), 2(Vasculares), 3(Gruesas o Pop Corn), 4(Leño o Vara), 5(Redondas o puntiformes), 6(Anulares), 7(Distroficas), 8(Leche de Calcio), 9(Suturas)  
     -Calsificaciones morfologia sospechosa: 1(Gruesas heterogeneas), 2(Amorfas), 3(Finas pleomorficas), 4(Lineas finas o lineales ramificadas)  
     -Distribicion de las calcificaciones: 1(Difusas), 2(Regionales), 3(Agrupadas (cumulo)), 4(Segmentaria), 5(Lineal) 
     -Presencia de asimetrias: 0(No), 1(Si) -Tipo de asimetria: 1(Asimetria), 2(Asimetria global), 3(Asimetria focal), 4(Asimetria focal evolutiva)
     -Hallazgos asociados: 1(Retracción de la piel), 2(Retracción del pezón), 3(Engrosamiento de la piel), 4(Engrosamiento trabecular), 5(Adenopatias axilares)
     -LATERALIDAD HALLAZGO:1(DERECHO), 2(IZQUIERDO), 3(BILATERAL) -BIRADS: 0, 1, 2, 3, 4A, 4B, 4C, 5, 6. 
-    Solo devuelve el numero, busca en todo el texto, ten en cuenta que cada nota puede contener variaciones del lenguaje 
-    y no necesariamente toda la información está disponible, si ni está disponible escribe NULL'''
+    Solo devuelve el numero, busca en todo el texto, ten en cuenta que cada nota puede contener variaciones del lenguaje y que pueden haber palabras usadas como sinonimos, 
+    y no necesariamente toda la información está disponible, si ni está disponible escribe NULL, terminos como MICROCALCIFICACIONES y CALCIFICACIONES BENIGNAS 
+    son importantes para la extracción de información y si existen calcificaciones benignas o no benignas son microcalcificaciones de igual manera. ej: ( Indicaciones: Control anual por antecedente de neoplasia en mama izquierda  tratada con mastectomía. 
+    Se cuenta con estudios previos de diciembre de 2017 y ecografía de diciembre de 2018.    
+    Técnica: Se realiza mamografía digital unilateral derecha con compresión graduada en proyecciones CC y MLO con tomosíntesis e imagen sintética 2D.   
+    Hallazgos: El parénquima mamario es fibroglandular disperso. No hay nódulos, zonas de distorsión ni microcalcificaciones que sugieran malignidad. 
+    Calcificaciones típicamente benignas.  Nódulo isodenso, de centro hipodenso, de aspecto benigno, estable, de 7 x 6 mm. 
+    Estables desde 2014. La piel y el complejo areola - pezón son normales. La región axilar tiene ganglios con centro hipodenso. 
+    No hay cambios evolutivos significativos al comparar con estudios previos.   Conclusión: Hallazgos benignos BIRADS 2.   
+    Se sugiere continuar con control mamográfico anual.   Dra Camila Morán.  
+    Residente Radiología.MEDICO RADIOLOGO: Aidee Zoraya Baez Guzman   RM: 3622-92       
+    2018-12-14 07:06:32) output = nodulos=0, presencia_microcalcificaciones=1, lateralidad_hallazgo=1, birads=2, edad=80  . Revisa todo el texto antes de dar un output''' 
 
     structured_data = []
 
-    for index, row in df.head(2).iterrows(): 
+    for index, row in df.iterrows():
         presentacion = row['PRESTACION']
         id_paciente = row['ID_DOCUMENTO']
+        edad = row['EDAD_EN_FECHA_ESTUDIO']
         notes = row['ESTUDIO']  
         
         response = openai.beta.chat.completions.parse(
             model="gpt-4o-mini-2024-07-18",
             messages=[
                 {"role": "system", "content": content },
-                {"role": "user", "content": f"Add ID_PACIENTE: {id_paciente} and PRESTACION: {presentacion} to each corresponding register. Extract the following information from the notes: {notes}. Look for terms like {search_terms}."}
+                {"role": "user", "content": f"Add ID_PACIENTE: {id_paciente}, PRESTACION: {presentacion}, EDAD{edad} to each corresponding register. Extract the following information from the notes: {notes}. Look for terms like {search_terms}."}
             ],
             response_format=MedicalNoteExtraction,
         )
@@ -74,5 +88,7 @@ async def process_medical_csv(
         extracted_info = response.choices[0].message.parsed
         print(extracted_info)
         structured_data.append(extracted_info)
-        
+    with open('structured_data.json', 'w', encoding='utf-8') as f:
+        json.dump(structured_data, f, ensure_ascii=False, indent=4)     
     return {"structured_data": structured_data}
+
