@@ -6,10 +6,7 @@ import openai
 import pandas as pd
 from typing import List
 from pydantic import BaseModel
-import json
 import oracledb
-import os
-from dotenv import load_dotenv
 
 app = FastAPI()
 
@@ -27,12 +24,15 @@ connection = oracledb.connect(
 )
 
 # Function to parse the extracted_info string
-def parse_extracted_info(info_str):
-    info_dict = {}
+def parse_extracted_info(extracted_info):
+    # Ensure extracted_info is a string
+    info_str = str(extracted_info)
+    parsed_info = {}
     for item in info_str.split(' '):
-        key, value = item.split('=')
-        info_dict[key] = value.strip("'")
-    return info_dict
+        if '=' in item:
+            key, value = item.split('=')
+            parsed_info[key.upper()] = value.strip("'")
+    return parsed_info
 
 class MedicalNoteExtraction(BaseModel):
     id_paciente: str
@@ -52,11 +52,9 @@ class MedicalNoteExtraction(BaseModel):
     birads: str  # 0, 1, 2, 3, 4A, 4B, 4C, 5, 6
     edad: str
 
-    
-
 @app.post("/process-medical-csv/")
 async def process_medical_csv(
-    file: UploadFile = File(...), 
+    file: UploadFile = File(...),
     search_terms: str = Form(...)
 ):
     if file.content_type != 'text/csv':
@@ -66,36 +64,36 @@ async def process_medical_csv(
     file_binary = BytesIO(content)
     df = pd.read_csv(file_binary, sep=';', encoding='utf-8')
     print("DF CARGADO")
-    content= '''You are an expert at extracting structured data from medical notes. Follow the same parameters: -Nodulos: 0(No) 1(Si) 
-    -Morfologia de los nodulos:1(Ovalado) 2(Redondo) 3(Irregular) -Margenes de los nodulos: 1(Circunscritos), 2(Microlobulados), 3(Indistintos o mal definidos), 4(Obscurecidos), 5(Espiculados) 
-    -Densidad del nodulo: 1(Densidad Grasa), 2(Baja Densidad (hipodenso)), 3(Igual Densidad (isodenso)), 4(Alta Densidad (hiperdenso))  
-    -Microcalcificaciones: 0(No) 1(Si) -Calcificaciones tipicamente benignas: 1(Cutaneas), 2(Vasculares), 3(Gruesas o Pop Corn), 4(Leño o Vara), 5(Redondas o puntiformes), 6(Anulares), 7(Distroficas), 8(Leche de Calcio), 9(Suturas)  
-    -Calsificaciones morfologia sospechosa: 1(Gruesas heterogeneas), 2(Amorfas), 3(Finas pleomorficas), 4(Lineas finas o lineales ramificadas)  
-    -Distribicion de las calcificaciones: 1(Difusas), 2(Regionales), 3(Agrupadas (cumulo)), 4(Segmentaria), 5(Lineal) 
+    content= '''You are an expert at extracting structured data from medical notes. Follow the same parameters: -Nodulos: 0(No) 1(Si)
+    -Morfologia de los nodulos:1(Ovalado) 2(Redondo) 3(Irregular) -Margenes de los nodulos: 1(Circunscritos), 2(Microlobulados), 3(Indistintos o mal definidos), 4(Obscurecidos), 5(Espiculados)
+    -Densidad del nodulo: 1(Densidad Grasa), 2(Baja Densidad (hipodenso)), 3(Igual Densidad (isodenso)), 4(Alta Densidad (hiperdenso))
+    -Microcalcificaciones: 0(No) 1(Si) -Calcificaciones tipicamente benignas: 1(Cutaneas), 2(Vasculares), 3(Gruesas o Pop Corn), 4(Leño o Vara), 5(Redondas o puntiformes), 6(Anulares), 7(Distroficas), 8(Leche de Calcio), 9(Suturas)
+    -Calsificaciones morfologia sospechosa: 1(Gruesas heterogeneas), 2(Amorfas), 3(Finas pleomorficas), 4(Lineas finas o lineales ramificadas)
+    -Distribicion de las calcificaciones: 1(Difusas), 2(Regionales), 3(Agrupadas (cumulo)), 4(Segmentaria), 5(Lineal)
     -Presencia de asimetrias: 0(No), 1(Si) -Tipo de asimetria: 1(Asimetria), 2(Asimetria global), 3(Asimetria focal), 4(Asimetria focal evolutiva)
     -Hallazgos asociados: 1(Retracción de la piel), 2(Retracción del pezón), 3(Engrosamiento de la piel), 4(Engrosamiento trabecular), 5(Adenopatias axilares)
-    -LATERALIDAD HALLAZGO:1(DERECHO), 2(IZQUIERDO), 3(BILATERAL) -BIRADS: 0, 1, 2, 3, 4A, 4B, 4C, 5, 6. 
-    Solo devuelve el numero, busca en todo el texto, ten en cuenta que cada nota puede contener variaciones del lenguaje y que pueden haber palabras usadas como sinonimos, 
-    y no necesariamente toda la información está disponible, si ni está disponible escribe NULL, terminos como MICROCALCIFICACIONES y CALCIFICACIONES BENIGNAS 
-    son importantes para la extracción de información y si existen calcificaciones benignas o no benignas son microcalcificaciones de igual manera. ej: ( Indicaciones: Control anual por antecedente de neoplasia en mama izquierda  tratada con mastectomía. 
-    Se cuenta con estudios previos de diciembre de 2017 y ecografía de diciembre de 2018.    
-    Técnica: Se realiza mamografía digital unilateral derecha con compresión graduada en proyecciones CC y MLO con tomosíntesis e imagen sintética 2D.   
-    Hallazgos: El parénquima mamario es fibroglandular disperso. No hay nódulos, zonas de distorsión ni microcalcificaciones que sugieran malignidad. 
-    Calcificaciones típicamente benignas.  Nódulo isodenso, de centro hipodenso, de aspecto benigno, estable, de 7 x 6 mm. 
-    Estables desde 2014. La piel y el complejo areola - pezón son normales. La región axilar tiene ganglios con centro hipodenso. 
-    No hay cambios evolutivos significativos al comparar con estudios previos.   Conclusión: Hallazgos benignos BIRADS 2.   
-    Se sugiere continuar con control mamográfico anual.   Dra Camila Morán.  
-    Residente Radiología.MEDICO RADIOLOGO: Aidee Zoraya Baez Guzman   RM: 3622-92       
-    2018-12-14 07:06:32) output = nodulos=0, presencia_microcalcificaciones=1, lateralidad_hallazgo=1, birads=2, edad=80  . Revisa todo el texto antes de dar un output''' 
+    -LATERALIDAD HALLAZGO:1(DERECHO), 2(IZQUIERDO), 3(BILATERAL) -BIRADS: 0, 1, 2, 3, 4A, 4B, 4C, 5, 6.
+    Solo devuelve el numero, busca en todo el texto, ten en cuenta que cada nota puede contener variaciones del lenguaje y que pueden haber palabras usadas como sinonimos,
+    y no necesariamente toda la información está disponible, si ni está disponible escribe NULL, terminos como MICROCALCIFICACIONES y CALCIFICACIONES BENIGNAS
+    son importantes para la extracción de información y si existen calcificaciones benignas o no benignas son microcalcificaciones de igual manera. ej: ( Indicaciones: Control anual por antecedente de neoplasia en mama izquierda  tratada con mastectomía.
+    Se cuenta con estudios previos de diciembre de 2017 y ecografía de diciembre de 2018.
+    Técnica: Se realiza mamografía digital unilateral derecha con compresión graduada en proyecciones CC y MLO con tomosíntesis e imagen sintética 2D.
+    Hallazgos: El parénquima mamario es fibroglandular disperso. No hay nódulos, zonas de distorsión ni microcalcificaciones que sugieran malignidad.
+    Calcificaciones típicamente benignas.  Nódulo isodenso, de centro hipodenso, de aspecto benigno, estable, de 7 x 6 mm.
+    Estables desde 2014. La piel y el complejo areola - pezón son normales. La región axilar tiene ganglios con centro hipodenso.
+    No hay cambios evolutivos significativos al comparar con estudios previos.   Conclusión: Hallazgos benignos BIRADS 2.
+    Se sugiere continuar con control mamográfico anual.   Dra Camila Morán.
+    Residente Radiología.MEDICO RADIOLOGO: Aidee Zoraya Baez Guzman   RM: 3622-92
+    2018-12-14 07:06:32) output = nodulos=0, presencia_microcalcificaciones=1, lateralidad_hallazgo=1, birads=2, edad=80  . Revisa todo el texto antes de dar un output'''
 
     structured_data = []
 
-    for index, row in df.iterrows():
+    for index, row in df.head(2).iterrows():
         presentacion = row['PRESTACION']
         id_paciente = row['ID_DOCUMENTO']
         edad = row['EDAD_EN_FECHA_ESTUDIO']
-        notes = row['ESTUDIO']  
-        
+        notes = row['ESTUDIO']
+
         response = openai.beta.chat.completions.parse(
             model="gpt-4o-mini-2024-07-18",
             messages=[
@@ -104,7 +102,7 @@ async def process_medical_csv(
             ],
             response_format=MedicalNoteExtraction,
         )
-    
+
         extracted_info = response.choices[0].message.parsed
         print(extracted_info)
 
@@ -112,8 +110,8 @@ async def process_medical_csv(
 
         # Create the insert query
         insert_query = """
-        INSERT INTO DATOS_EXTRAIDOS (ID_PACIENTE, PRESTACION, NODULOS, MORFOLOGIA_NODULOS, MARGENES_NODULOS, DENSIDAD_NODULO, MICROCALCIFICACIONES, PRESENCIA_MICROCALCIFICACIONES, CALCIFICACIONES_BENIGNAS, CALCIFICACIONES_SOSPECHOSAS, DISTRIBUCION_CALCIFICACIONES, PRESENCIA_ASIMETRIAS, TIPO_ASIMETRIA, HALLAZGOS_ASOCIADOS, LATERALIDAD_HALLAZGO, BIRADS, EDAD)
-        VALUES (:id_paciente, :prestacion, :nodulos, :morfologia_nodulos, :margenes_nodulos, :densidad_nodulo, :microcalcificaciones, :presencia_microcalcificaciones, :calcificaciones_benignas, :calcificaciones_sospechosas, :distribucion_calcificaciones, :presencia_asimetrias, :tipo_asimetria, :hallazgos_asociados, :lateralidad_hallazgo, :birads, :edad)
+        INSERT INTO DATOS_EXTRAIDOS (ID_PACIENTE, PRESTACION, NODULOS, MORFOLOGIA_NODULOS, MARGENES_NODULOS, DENSIDAD_NODULO, MICROCALCIFICACIONES, CALCIFICACIONES_BENIGNAS, CALCIFICACIONES_SOSPECHOSAS, DISTRIBUCION_CALCIFICACIONES, PRESENCIA_ASIMETRIAS, TIPO_ASIMETRIA, HALLAZGOS_ASOCIADOS, LATERALIDAD_HALLAZGO, BIRADS, EDAD)
+        VALUES (:ID_PACIENTE, :PRESTACION, :NODULOS, :MORFOLOGIA_NODULOS, :MARGENES_NODULOS, :DENSIDAD_NODULO, :MICROCALCIFICACIONES, :CALCIFICACIONES_BENIGNAS, :CALCIFICACIONES_SOSPECHOSAS, :DISTRIBUCION_CALCIFICACIONES, :PRESENCIA_ASIMETRIAS, :TIPO_ASIMETRIA, :HALLAZGOS_ASOCIADOS, :LATERALIDAD_HALLAZGO, :BIRADS, :EDAD)
         """
         # Execute the insert query
         with connection.cursor() as cursor:
@@ -121,7 +119,5 @@ async def process_medical_csv(
             connection.commit()
 
         structured_data.append(extracted_info)
-    with open('structured_data.json', 'w', encoding='utf-8') as f:
-        json.dump(structured_data, f, ensure_ascii=False, indent=4)     
-    return {"structured_data": structured_data}
 
+    return {"structured_data": structured_data}
