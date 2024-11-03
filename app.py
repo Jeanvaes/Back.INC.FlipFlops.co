@@ -7,12 +7,32 @@ import pandas as pd
 from typing import List
 from pydantic import BaseModel
 import json
-
+import oracledb
+import os
+from dotenv import load_dotenv
 
 app = FastAPI()
 
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
+
+os.environ["TNS_ADMIN"] = os.getenv("TNS_ADMIN")
+connection = oracledb.connect(
+    user=os.getenv("DB_USER"),
+    password=os.getenv("DB_PASSWORD"),
+    dsn=os.getenv("DB_DSN"),
+    config_dir=os.getenv("CONFIG_DIR"),
+    wallet_location=os.getenv("WALLET_LOCATION"),
+    wallet_password=os.getenv("WALLET_PASSWORD")
+)
+
+# Function to parse the extracted_info string
+def parse_extracted_info(info_str):
+    info_dict = {}
+    for item in info_str.split(' '):
+        key, value = item.split('=')
+        info_dict[key] = value.strip("'")
+    return info_dict
 
 class MedicalNoteExtraction(BaseModel):
     id_paciente: str
@@ -87,6 +107,19 @@ async def process_medical_csv(
     
         extracted_info = response.choices[0].message.parsed
         print(extracted_info)
+
+        parsed_info = parse_extracted_info(extracted_info)
+
+        # Create the insert query
+        insert_query = """
+        INSERT INTO DATOS_EXTRAIDOS (ID_PACIENTE, PRESTACION, NODULOS, MORFOLOGIA_NODULOS, MARGENES_NODULOS, DENSIDAD_NODULO, MICROCALCIFICACIONES, PRESENCIA_MICROCALCIFICACIONES, CALCIFICACIONES_BENIGNAS, CALCIFICACIONES_SOSPECHOSAS, DISTRIBUCION_CALCIFICACIONES, PRESENCIA_ASIMETRIAS, TIPO_ASIMETRIA, HALLAZGOS_ASOCIADOS, LATERALIDAD_HALLAZGO, BIRADS, EDAD)
+        VALUES (:id_paciente, :prestacion, :nodulos, :morfologia_nodulos, :margenes_nodulos, :densidad_nodulo, :microcalcificaciones, :presencia_microcalcificaciones, :calcificaciones_benignas, :calcificaciones_sospechosas, :distribucion_calcificaciones, :presencia_asimetrias, :tipo_asimetria, :hallazgos_asociados, :lateralidad_hallazgo, :birads, :edad)
+        """
+        # Execute the insert query
+        with connection.cursor() as cursor:
+            cursor.execute(insert_query, parsed_info)
+            connection.commit()
+
         structured_data.append(extracted_info)
     with open('structured_data.json', 'w', encoding='utf-8') as f:
         json.dump(structured_data, f, ensure_ascii=False, indent=4)     
